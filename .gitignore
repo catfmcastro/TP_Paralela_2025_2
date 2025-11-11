@@ -1,0 +1,4 @@
+adaline_learning.exe
+adaline_omp_cpu.exe
+adaline_omp_gpu.exe
+adaline_seq.exe
