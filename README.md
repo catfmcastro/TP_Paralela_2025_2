@@ -74,14 +74,6 @@ Execução:
 ### Versão 4: CUDA para GPU
 
 Compilação (usando o compilador CUDA 'nvcc'):
-nvcc adaline_cuda.cu -o adaline_cuda -lm
-
-(Nota: nvcc precisa linkar a biblioteca matemática '-lm' se
- omp_get_wtime() não for encontrado; neste caso, usamos -Xcompiler
- "-fopenmp" para linkar o timer, ou podemos trocar o timer por
- time.h)
-
-Compilação mais robusta (incluindo o timer OpenMP):
 nvcc adaline_cuda.cu -o adaline_cuda -Xcompiler "-fopenmp" -lm
 
 Execução:
