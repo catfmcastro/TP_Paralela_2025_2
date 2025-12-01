@@ -1,7 +1,8 @@
 # Projeto de Paralelização de IA: ADALINE (Adaptive Linear Neuron)
 
-Este projeto implementa e paralisa um modelo de Rede Neural ADALINE
-para o dataset de Câncer de Mama de Wisconsin (data.csv).
+## Alunos:
+- Diego Pereira Maia
+- Catarina França de Moura Castro
 
 ## 1. Sobre a Aplicação
 
