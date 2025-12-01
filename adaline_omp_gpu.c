@@ -127,9 +127,7 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
                             map(tofrom: weights[0:num_weights]) \
                             map(alloc: total_gradient[0:num_weights])
     {
-        for (iter = 0;
-             (iter < MAX_ADALINE_ITER) && (mse > ADALINE_ACCURACY);
-             iter++)
+        for (iter = 0; iter < MAX_ADALINE_ITER; iter++)
         {
             #pragma omp target teams distribute parallel for
             for(int j=0; j < num_weights; j++) total_gradient[j] = 0.0;
@@ -158,22 +156,27 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
                 weights[j] += eta * total_gradient[j] / (double)N;
             }
 
-            #pragma omp target update from(weights[0:num_weights])
-            
-            double sum_squared_errors = 0.0;
-            for (int i = 0; i < N; i++)
+            if (iter % 50 == 0 || iter == MAX_ADALINE_ITER - 1)
             {
-                double net_input = weights[num_weights - 1];
-                for (int j = 0; j < num_weights - 1; j++)
-                    net_input += X_flat[i * NUM_FEATURES + j] * weights[j];
-                double prediction_error = (double)y[i] - net_input;
-                sum_squared_errors += prediction_error * prediction_error;
-            }
-            mse = sum_squared_errors / N;
-
-            if (iter % 50 == 0)
-            {
+                #pragma omp target update from(weights[0:num_weights])
+                
+                double sum_squared_errors = 0.0;
+                for (int i = 0; i < N; i++)
+                {
+                    double net_input = weights[num_weights - 1];
+                    for (int j = 0; j < num_weights - 1; j++)
+                        net_input += X_flat[i * NUM_FEATURES + j] * weights[j];
+                    double prediction_error = (double)y[i] - net_input;
+                    sum_squared_errors += prediction_error * prediction_error;
+                }
+                mse = sum_squared_errors / N;
                 printf("\tIter %3d: MSE: %.8f\n", iter, mse);
+                
+                if (mse <= ADALINE_ACCURACY)
+                {
+                    iter++;
+                    break;
+                }
             }
         }
     }
@@ -185,7 +188,6 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
         ada->weights[j] = weights[j];
     }
 
-    printf("\tIter %3d: MSE: %.8f\n", iter, mse);
     if (iter < MAX_ADALINE_ITER)
         printf("Convergiu apos %d iteracoes.\n", iter);
     else
