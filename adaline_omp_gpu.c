@@ -175,6 +175,10 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
     double end_time = omp_get_wtime();
     double exec_time = end_time - start_time;
 
+    for (int j = 0; j < num_weights; j++) {
+        ada->weights[j] = weights[j];
+    }
+
     printf("\tIter %3d: MSE: %.8f\n", iter, mse);
     if (iter < MAX_ADALINE_ITER)
         printf("Convergiu apos %d iteracoes.\n", iter);
