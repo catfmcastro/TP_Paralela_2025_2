@@ -1,7 +1,4 @@
 /**
- * \file
- * \brief Implementação do ADALINE com BGD - Versão PARALELA (OpenMP GPU Offload)
- *
  * Esta versão paraleliza o BGD usando OpenMP 4.5+ para descarregar
  * o processamento (offload) para uma GPU NVIDIA.
  *
@@ -27,11 +24,6 @@
  * - A função `adaline_predict_gpu` foi marcada com
  * `#pragma omp declare target` para que possa ser chamada de dentro
  * de uma região `target` (executada na GPU).
- *
- * 6. CORREÇÕES DE BUG:
- * - Corrigido `delete_adaline` para usar '->' (ponteiro).
- * - Adicionada uma função `adaline_predict_cpu` para ser chamada
- * pelo host no cálculo de acurácia.
  */
 
 #include <assert.h>
@@ -43,7 +35,6 @@
 #include <time.h>
 #include <omp.h>
 
-/* --- Constantes --- */
 #define NUM_SAMPLES 569
 #define NUM_FEATURES 30
 #define DATA_FILE "data.csv"
@@ -57,7 +48,6 @@ struct adaline
     int num_weights;
 };
 
-/* --- Protótipos --- */
 struct adaline new_adaline(const int num_features, const double eta);
 void delete_adaline(struct adaline *ada);
 int adaline_activation(double x);
@@ -66,10 +56,6 @@ void load_and_preprocess_flat(double **X_flat_ptr, int **Y_ptr);
 void free_flat_data(double *X_flat, int *Y);
 double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, const int N);
 
-
-/**
- * \brief Construtor
- */
 struct adaline new_adaline(const int num_features, const double eta)
 {
     int num_weights = num_features + 1;
@@ -83,30 +69,18 @@ struct adaline new_adaline(const int num_features, const double eta)
     return ada;
 }
 
-/**
- * \brief Libera memória (CORRIGIDO)
- */
 void delete_adaline(struct adaline *ada)
 {
     if (ada == NULL) return;
-    // CORREÇÃO: 'ada' é um ponteiro, usar '->'
     free(ada->weights);
     ada->weights = NULL;
 };
 
-/**
- * \brief Função de ativação (será usada por ambas CPU/GPU)
- */
 int adaline_activation(double x) { return x >= 0 ? 1 : -1; }
 
-/**
- * \brief Predição (marcada para execução na GPU)
- * REQUISITO (iii): Esta função precisa ser visível para o device (GPU).
- */
 #pragma omp declare target
 int adaline_predict_gpu(const double *weights, int num_weights, const double *x_sample, double *net_input_out)
 {
-    // O último peso é o bias
     double y = weights[num_weights - 1]; 
 
     for (int i = 0; i < num_weights - 1; i++)
@@ -119,13 +93,8 @@ int adaline_predict_gpu(const double *weights, int num_weights, const double *x_
 }
 #pragma omp end declare target
 
-/**
- * \brief Predição (versão Host/CPU para acurácia)
- * CORREÇÃO: Adicionada esta função para ser chamada pelo host.
- */
 int adaline_predict_cpu(struct adaline *ada, const double *x_sample, double *net_input_out)
 {
-    // 'ada' é um ponteiro, usar '->'
     double y = ada->weights[ada->num_weights - 1]; 
     for (int i = 0; i < ada->num_weights - 1; i++)
         y += x_sample[i] * ada->weights[i];
@@ -136,18 +105,13 @@ int adaline_predict_cpu(struct adaline *ada, const double *x_sample, double *net
     return adaline_activation(y);
 }
 
-/**
- * \brief Treina o modelo - Versão PARALELA (OpenMP GPU Offload)
- */
 double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, const int N)
 {
     double mse = 1.0;
     int iter;
-    // 'ada' é um ponteiro, usar '->'
     int num_weights = ada->num_weights;
     double eta = ada->eta;
-    
-    // Aloca memória para gradientes (na CPU, será mapeado para GPU)
+
     double *total_gradient = (double *)calloc(num_weights, sizeof(double));
     if (!total_gradient) {
         perror("Falha ao alocar gradientes");
@@ -157,11 +121,7 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
     printf("Iniciando treinamento BGD (OpenMP GPU Offload)...\n");
     
     double start_time = omp_get_wtime();
-    
-    /*
-     * REQUISITO (iii): Mapeia os dados para a GPU *uma vez*
-     * 'ada->weights' é 'tofrom' pois é lido e escrito
-     */
+
     #pragma omp target data map(to: X_flat[0:N*NUM_FEATURES], y[0:N]) \
                             map(tofrom: ada->weights[0:num_weights]) \
                             map(alloc: total_gradient[0:num_weights])
@@ -176,16 +136,12 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
             #pragma omp target teams distribute parallel for
             for(int j=0; j < num_weights; j++) total_gradient[j] = 0.0;
 
-            /*
-             * REQUISITO (iii): Loop de Cálculo de Gradiente na GPU
-             */
             #pragma omp target teams distribute parallel for \
                         reduction(+:sum_squared_errors) \
                         reduction(+:total_gradient[0:num_weights])
             for (int i = 0; i < N; i++)
             {
                 double net_input;
-                // &X_flat[i * NUM_FEATURES] é o ponteiro para a amostra 'i'
                 adaline_predict_gpu(ada->weights, num_weights, &X_flat[i * NUM_FEATURES], &net_input);
 
                 double prediction_error = (double)y[i] - net_input;
@@ -201,9 +157,6 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
             
             mse = sum_squared_errors / N;
 
-            /*
-             * REQUISITO (iii): Atualização dos Pesos na GPU
-             */
             #pragma omp target teams distribute parallel for
             for (int j = 0; j < num_weights; j++)
             {
@@ -212,14 +165,11 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
 
             if (iter % 50 == 0)
             {
-                // Imprime o MSE (requer que 'mse' seja calculado na GPU
-                // ou uma cópia dos erros). Para este projeto,
-                // a thread master imprimir o 'mse' da CPU está OK.
                 #pragma omp master
                 printf("\tIter %3d: MSE: %.8f\n", iter, mse);
             }
         }
-    } // Fim da região 'target data'. 'ada->weights' é copiado de volta.
+    }
 
     double end_time = omp_get_wtime();
     double exec_time = end_time - start_time;
@@ -234,37 +184,26 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
     return exec_time;
 }
 
-/**
- * \brief Função principal (main)
- */
 int main(int argc, char **argv)
 {
     srand(time(NULL));
 
-    double *X_flat; // Dados achatados
+    double *X_flat;
     int *Y;
 
-    // Carrega dados e já os "achata" para a GPU
     load_and_preprocess_flat(&X_flat, &Y);
 
-    // --- Treinamento do Modelo ---
     double eta = 0.001;
     struct adaline ada = new_adaline(NUM_FEATURES, eta);
     
     printf("--- Versao OpenMP GPU Offload ---\n");
-    // Passa o *endereço* de 'ada' (&ada)
     double gpu_time = adaline_fit_bgd_gpu(&ada, X_flat, Y, NUM_SAMPLES);
     printf("Tempo de Treinamento (GPU Offload): %.6f segundos\n", gpu_time);
 
-    // --- Cálculo da Acurácia (na CPU) ---
     int correct_predictions = 0;
     for (int i = 0; i < NUM_SAMPLES; i++)
     {
         double net_input;
-        /*
-         * CORREÇÃO: Chama a versão CPU da predição
-         * para calcular a acurácia no host.
-         */
         int prediction = adaline_predict_cpu(&ada, &X_flat[i * NUM_FEATURES], &net_input);
         if (prediction == Y[i])
         {
@@ -277,21 +216,14 @@ int main(int argc, char **argv)
            correct_predictions, NUM_SAMPLES);
     printf("----------------------------------\n");
 
-    // --- Limpeza ---
     free_flat_data(X_flat, Y);
-    delete_adaline(&ada); // Passa o endereço de 'ada'
+    delete_adaline(&ada); 
 
     return 0;
 }
 
-
-/**
- * \brief Carrega dados e os "achata" (flatten) para um array 1D
- * (Esta função permanece idêntica à da resposta anterior)
- */
 void load_and_preprocess_flat(double **X_flat_ptr, int **Y_ptr)
 {
-    // Aloca X como um array 1D (achatado)
     double *X_flat = (double *)malloc(NUM_SAMPLES * NUM_FEATURES * sizeof(double));
     int *Y = (int *)malloc(NUM_SAMPLES * sizeof(int));
     double *feature_mean = (double *)calloc(NUM_FEATURES, sizeof(double));
@@ -302,7 +234,6 @@ void load_and_preprocess_flat(double **X_flat_ptr, int **Y_ptr)
         exit(EXIT_FAILURE);
     }
     
-    // Carregamento sequencial (leitura de arquivo)
     FILE *fp = fopen(DATA_FILE, "r");
     if (!fp) { perror("Nao foi possivel abrir data.csv"); exit(EXIT_FAILURE); }
 
@@ -319,7 +250,6 @@ void load_and_preprocess_flat(double **X_flat_ptr, int **Y_ptr)
         
         for (int j = 0; j < NUM_FEATURES; j++) {
             token = strtok(NULL, ",");
-            // Acesso achatado
             X_flat[sample_count * NUM_FEATURES + j] = atof(token);
         }
         sample_count++;
@@ -328,7 +258,6 @@ void load_and_preprocess_flat(double **X_flat_ptr, int **Y_ptr)
 
     printf("Dados brutos carregados. Iniciando pre-processamento...\n");
 
-    // --- Passagem 1: Média (Sequencial) ---
     for (int i = 0; i < NUM_SAMPLES; i++) {
         for (int j = 0; j < NUM_FEATURES; j++) {
             feature_mean[j] += X_flat[i * NUM_FEATURES + j];
@@ -336,7 +265,6 @@ void load_and_preprocess_flat(double **X_flat_ptr, int **Y_ptr)
     }
     for (int j = 0; j < NUM_FEATURES; j++) feature_mean[j] /= NUM_SAMPLES;
 
-    // --- Passagem 2: StdDev (Sequencial) ---
     for (int i = 0; i < NUM_SAMPLES; i++) {
         for (int j = 0; j < NUM_FEATURES; j++) {
             double val = X_flat[i * NUM_FEATURES + j];
@@ -348,7 +276,6 @@ void load_and_preprocess_flat(double **X_flat_ptr, int **Y_ptr)
         if (feature_stddev[j] < 1e-10) feature_stddev[j] = 1.0; 
     }
 
-    // --- Padronização (Sequencial) ---
     for (int i = 0; i < NUM_SAMPLES; i++) {
         for (int j = 0; j < NUM_FEATURES; j++) {
             int idx = i * NUM_FEATURES + j;
@@ -360,15 +287,11 @@ void load_and_preprocess_flat(double **X_flat_ptr, int **Y_ptr)
 
     *X_flat_ptr = X_flat;
     *Y_ptr = Y;
-    
-    // Não precisamos mais disso
+
     free(feature_mean);
     free(feature_stddev);
 }
 
-/**
- * \brief Libera memória dos dados achatados
- */
 void free_flat_data(double *X_flat, int *Y)
 {
     printf("Limpando memoria...\n");
