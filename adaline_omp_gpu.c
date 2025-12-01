@@ -127,35 +127,30 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
                             map(tofrom: weights[0:num_weights]) \
                             map(alloc: total_gradient[0:num_weights])
     {
-        #pragma omp target
+        for (iter = 0; iter < MAX_ADALINE_ITER; iter++)
         {
-            for (iter = 0; iter < MAX_ADALINE_ITER; iter++)
+            for(int j=0; j < num_weights; j++) total_gradient[j] = 0.0;
+
+            #pragma omp target teams distribute parallel for reduction(+:total_gradient[0:num_weights])
+            for (int i = 0; i < N; i++)
             {
-                #pragma omp teams distribute parallel for
-                for(int j=0; j < num_weights; j++) total_gradient[j] = 0.0;
+                double net_input = weights[num_weights - 1];
+                
+                for (int j = 0; j < num_weights - 1; j++)
+                    net_input += X_flat[i * NUM_FEATURES + j] * weights[j];
 
-                #pragma omp teams distribute parallel for reduction(+:total_gradient[0:num_weights])
-                for (int i = 0; i < N; i++)
+                double prediction_error = (double)y[i] - net_input;
+
+                for (int j = 0; j < num_weights - 1; j++)
                 {
-                    double net_input = weights[num_weights - 1];
-                    
-                    for (int j = 0; j < num_weights - 1; j++)
-                        net_input += X_flat[i * NUM_FEATURES + j] * weights[j];
-
-                    double prediction_error = (double)y[i] - net_input;
-
-                    for (int j = 0; j < num_weights - 1; j++)
-                    {
-                        total_gradient[j] += prediction_error * X_flat[i * NUM_FEATURES + j];
-                    }
-                    total_gradient[num_weights - 1] += prediction_error;
+                    total_gradient[j] += prediction_error * X_flat[i * NUM_FEATURES + j];
                 }
+                total_gradient[num_weights - 1] += prediction_error;
+            }
 
-                #pragma omp teams distribute parallel for
-                for (int j = 0; j < num_weights; j++)
-                {
-                    weights[j] += eta * total_gradient[j] / (double)N;
-                }
+            for (int j = 0; j < num_weights; j++)
+            {
+                weights[j] += eta * total_gradient[j] / (double)N;
             }
         }
     }
