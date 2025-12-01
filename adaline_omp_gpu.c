@@ -131,23 +131,19 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
              (iter < MAX_ADALINE_ITER) && (mse > ADALINE_ACCURACY);
              iter++)
         {
-            double sum_squared_errors = 0.f;
-            
-            // Zera os gradientes na GPU
             #pragma omp target teams distribute parallel for
             for(int j=0; j < num_weights; j++) total_gradient[j] = 0.0;
 
             #pragma omp target teams distribute parallel for \
-                        reduction(+:sum_squared_errors) \
                         reduction(+:total_gradient[0:num_weights])
             for (int i = 0; i < N; i++)
             {
-                double net_input;
-                adaline_predict_gpu(weights, num_weights, &X_flat[i * NUM_FEATURES], &net_input);
+                double net_input = weights[num_weights - 1];
+                
+                for (int j = 0; j < num_weights - 1; j++)
+                    net_input += X_flat[i * NUM_FEATURES + j] * weights[j];
 
                 double prediction_error = (double)y[i] - net_input;
-                
-                sum_squared_errors += prediction_error * prediction_error;
 
                 for (int j = 0; j < num_weights - 1; j++)
                 {
@@ -155,8 +151,6 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
                 }
                 total_gradient[num_weights - 1] += prediction_error;
             }
-            
-            mse = sum_squared_errors / N;
 
             #pragma omp target teams distribute parallel for
             for (int j = 0; j < num_weights; j++)
@@ -164,9 +158,21 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
                 weights[j] += eta * total_gradient[j] / (double)N;
             }
 
+            #pragma omp target update from(weights[0:num_weights])
+            
+            double sum_squared_errors = 0.0;
+            for (int i = 0; i < N; i++)
+            {
+                double net_input = weights[num_weights - 1];
+                for (int j = 0; j < num_weights - 1; j++)
+                    net_input += X_flat[i * NUM_FEATURES + j] * weights[j];
+                double prediction_error = (double)y[i] - net_input;
+                sum_squared_errors += prediction_error * prediction_error;
+            }
+            mse = sum_squared_errors / N;
+
             if (iter % 50 == 0)
             {
-                #pragma omp master
                 printf("\tIter %3d: MSE: %.8f\n", iter, mse);
             }
         }
