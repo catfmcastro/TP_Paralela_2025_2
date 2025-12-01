@@ -111,6 +111,7 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
     int iter;
     int num_weights = ada->num_weights;
     double eta = ada->eta;
+    double *weights = ada->weights;
 
     double *total_gradient = (double *)calloc(num_weights, sizeof(double));
     if (!total_gradient) {
@@ -123,7 +124,7 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
     double start_time = omp_get_wtime();
 
     #pragma omp target data map(to: X_flat[0:N*NUM_FEATURES], y[0:N]) \
-                            map(tofrom: ada->weights[0:num_weights]) \
+                            map(tofrom: weights[0:num_weights]) \
                             map(alloc: total_gradient[0:num_weights])
     {
         for (iter = 0;
@@ -142,7 +143,7 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
             for (int i = 0; i < N; i++)
             {
                 double net_input;
-                adaline_predict_gpu(ada->weights, num_weights, &X_flat[i * NUM_FEATURES], &net_input);
+                adaline_predict_gpu(weights, num_weights, &X_flat[i * NUM_FEATURES], &net_input);
 
                 double prediction_error = (double)y[i] - net_input;
                 
@@ -160,7 +161,7 @@ double adaline_fit_bgd_gpu(struct adaline *ada, double *X_flat, const int *y, co
             #pragma omp target teams distribute parallel for
             for (int j = 0; j < num_weights; j++)
             {
-                ada->weights[j] += eta * total_gradient[j] / (double)N;
+                weights[j] += eta * total_gradient[j] / (double)N;
             }
 
             if (iter % 50 == 0)
