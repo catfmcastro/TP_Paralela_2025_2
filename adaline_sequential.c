@@ -1,7 +1,4 @@
 /**
- * \file
- * \brief Implementação do ADALINE com Batch Gradient Descent (BGD) - Versão SEQUENCIAL
- *
  * Esta é a versão base para medição de speedup.
  * O treinamento foi modificado de Stochastic (SGD) para Batch (BGD)
  * para permitir a paralelização nas versões futuras.
@@ -17,27 +14,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h> // Para time()
-#include <omp.h>    // Para omp_get_wtime()
+#include <time.h> 
+#include <omp.h>    
 
-/* --- Constantes do Dataset --- */
 #define NUM_SAMPLES 569
 #define NUM_FEATURES 30
 #define DATA_FILE "data.csv"
-
-/* --- Constantes do ADALINE --- */
 #define MAX_ADALINE_ITER 500
-#define ADALINE_ACCURACY 1e-5 // Convergência do MSE
+#define ADALINE_ACCURACY 1e-5 
 
-/** Estrutura do modelo ADALINE */
 struct adaline
 {
-    double eta;      /**< Taxa de aprendizado */
-    double *weights; /**< Pesos (incluindo bias) */
-    int num_weights; /**< num_features + 1 (para o bias) */
+    double eta;      
+    double *weights; 
+    int num_weights; 
 };
 
-/* --- Protótipos das Funções --- */
 struct adaline new_adaline(const int num_features, const double eta);
 void delete_adaline(struct adaline *ada);
 int adaline_activation(double x);
@@ -46,9 +38,6 @@ double adaline_fit_bgd(struct adaline *ada, double **X, const int *y, const int 
 void load_and_preprocess_data(double ***X, int **Y, double **feature_mean, double **feature_stddev);
 void free_data(double **X, int *Y, double *feature_mean, double *feature_stddev);
 
-/**
- * \brief Construtor do modelo ADALINE
- */
 struct adaline new_adaline(const int num_features, const double eta)
 {
     if (eta <= 0.f || eta >= 1.f)
@@ -68,16 +57,13 @@ struct adaline new_adaline(const int num_features, const double eta)
         exit(EXIT_FAILURE);
     }
 
-    // Inicializa com pesos aleatórios pequenos
     for (int i = 0; i < num_weights; i++)
         ada.weights[i] = ((double)rand() / RAND_MAX) * 0.02 - 0.01;
 
     return ada;
 }
 
-/**
- * \brief Libera memória do modelo
- */
+
 void delete_adaline(struct adaline *ada)
 {
     if (ada == NULL) return;
@@ -85,17 +71,11 @@ void delete_adaline(struct adaline *ada)
     ada->weights = NULL;
 };
 
-/**
- * \brief Função de ativação Heaviside (degrau)
- */
+
 int adaline_activation(double x) { return x >= 0 ? 1 : -1; }
 
-/**
- * \brief Calcula a saída linear (net_input) e a predição ativada
- */
 int adaline_predict(struct adaline *ada, const double *x, double *net_input_out)
 {
-    // O último peso é o bias
     double y = ada->weights[ada->num_weights - 1]; 
 
     for (int i = 0; i < ada->num_weights - 1; i++)
@@ -107,17 +87,10 @@ int adaline_predict(struct adaline *ada, const double *x, double *net_input_out)
     return adaline_activation(y);
 }
 
-/**
- * \brief Treina o modelo usando Batch Gradient Descent (BGD)
- * \param num_threads (ignorado na versão sequencial, usado na OpenMP)
- * \returns Tempo de execução do treinamento
- */
 double adaline_fit_bgd(struct adaline *ada, double **X, const int *y, const int N, int num_threads)
 {
-    double mse = 1.0; // Mean Squared Error
+    double mse = 1.0;
     int iter;
-
-    // Aloca memória para os gradientes totais (um para cada peso + 1 para o bias)
     double *total_gradient = (double *)calloc(ada->num_weights, sizeof(double));
     if (!total_gradient)
     {
@@ -134,39 +107,22 @@ double adaline_fit_bgd(struct adaline *ada, double **X, const int *y, const int 
          iter++)
     {
         double sum_squared_errors = 0.f;
-        // Zera os gradientes para a nova época
         for(int j=0; j < ada->num_weights; j++) total_gradient[j] = 0.0;
-
-        /*
-         * PASSO 1 & 2: Cálculo e Redução dos Gradientes (em BGD)
-         * Esta é a parte que será paralelizada.
-         */
-        for (int i = 0; i < N; i++) // Loop sobre todas as amostras
+        for (int i = 0; i < N; i++) 
         {
             double net_input;
             adaline_predict(ada, X[i], &net_input);
-
-            // Calcula o erro da saída linear
             double prediction_error = (double)y[i] - net_input;
-            
-            // Acumula erro quadrático para o MSE
             sum_squared_errors += prediction_error * prediction_error;
-
-            // Acumula gradiente para cada peso
             for (int j = 0; j < ada->num_weights - 1; j++)
             {
                 total_gradient[j] += prediction_error * X[i][j];
             }
-            // Acumula gradiente para o bias
             total_gradient[ada->num_weights - 1] += prediction_error;
         }
         
         mse = sum_squared_errors / N;
 
-        /*
-         * PASSO 3: Aplicação da Atualização dos Pesos
-         * Atualiza os pesos usando o gradiente médio
-         */
         for (int j = 0; j < ada->num_weights; j++)
         {
             ada->weights[j] += ada->eta * total_gradient[j] / (double)N;
@@ -189,32 +145,24 @@ double adaline_fit_bgd(struct adaline *ada, double **X, const int *y, const int 
     return exec_time;
 }
 
-/**
- * \brief Função principal (main)
- */
 int main(int argc, char **argv)
 {
     srand(time(NULL));
 
-    // Variáveis para os dados
     double **X;
     int *Y;
     double *feature_mean;
     double *feature_stddev;
 
-    // Carrega e pré-processa os dados
     load_and_preprocess_data(&X, &Y, &feature_mean, &feature_stddev);
 
-    // --- Treinamento do Modelo ---
     double eta = 0.001;
     struct adaline ada = new_adaline(NUM_FEATURES, eta);
     
     printf("--- Versao Sequencial (1 Thread) ---\n");
-    // O '1' para num_threads é apenas um placeholder
     double sequential_time = adaline_fit_bgd(&ada, X, Y, NUM_SAMPLES, 1);
     printf("Tempo de Treinamento (Sequencial): %.6f segundos\n", sequential_time);
 
-    // --- Cálculo da Acurácia ---
     int correct_predictions = 0;
     for (int i = 0; i < NUM_SAMPLES; i++)
     {
@@ -230,20 +178,14 @@ int main(int argc, char **argv)
            correct_predictions, NUM_SAMPLES);
     printf("----------------------------------\n");
 
-    // --- Limpeza ---
     free_data(X, Y, feature_mean, feature_stddev);
     delete_adaline(&ada);
 
     return 0;
 }
 
-
-/**
- * \brief Carrega dados do DATA_FILE, calcula média/stddev e padroniza (Z-score)
- */
 void load_and_preprocess_data(double ***X_ptr, int **Y_ptr, double **mean_ptr, double **stddev_ptr)
 {
-    // --- Alocação de Memória ---
     double **X = (double **)malloc(NUM_SAMPLES * sizeof(double *));
     int *Y = (int *)malloc(NUM_SAMPLES * sizeof(int));
     double *feature_mean = (double *)calloc(NUM_FEATURES, sizeof(double));
@@ -270,7 +212,6 @@ void load_and_preprocess_data(double ***X_ptr, int **Y_ptr, double **mean_ptr, d
     char line[4096];
     fgets(line, sizeof(line), fp); // Pula cabeçalho
 
-    // --- PASSAGEM 1: Calcular Média ---
     printf("Carregando dados... (Passo 1: Calculando Media)\n");
     int sample_count = 0;
     while (fgets(line, sizeof(line), fp) && sample_count < NUM_SAMPLES)
@@ -290,10 +231,9 @@ void load_and_preprocess_data(double ***X_ptr, int **Y_ptr, double **mean_ptr, d
         feature_mean[j] /= sample_count;
     }
     
-    rewind(fp); // Volta ao início do arquivo
-    fgets(line, sizeof(line), fp); // Pula cabeçalho novamente
+    rewind(fp); 
+    fgets(line, sizeof(line), fp); 
 
-    // --- PASSAGEM 2: Calcular StdDev & Carregar Dados ---
     printf("Carregando dados... (Passo 2: Calculando StdDev e Padronizando)\n");
     
     sample_count = 0;
@@ -315,13 +255,11 @@ void load_and_preprocess_data(double ***X_ptr, int **Y_ptr, double **mean_ptr, d
         sample_count++;
     }
 
-    // Finaliza cálculo do StdDev
     for (int j = 0; j < NUM_FEATURES; j++) {
         feature_stddev[j] = sqrt(feature_stddev[j] / sample_count);
         if (feature_stddev[j] < 1e-10) feature_stddev[j] = 1.0; 
     }
 
-    // Padroniza (Z-score) todos os dados em X
     for (int i = 0; i < NUM_SAMPLES; i++) {
         for (int j = 0; j < NUM_FEATURES; j++) {
             X[i][j] = (X[i][j] - feature_mean[j]) / feature_stddev[j];
@@ -331,16 +269,12 @@ void load_and_preprocess_data(double ***X_ptr, int **Y_ptr, double **mean_ptr, d
     fclose(fp);
     printf("Carregamento e padronizacao completos.\n");
 
-    // Retorna os ponteiros alocados
     *X_ptr = X;
     *Y_ptr = Y;
     *mean_ptr = feature_mean;
     *stddev_ptr = feature_stddev;
 }
 
-/**
- * \brief Libera a memória alocada para os dados
- */
 void free_data(double **X, int *Y, double *feature_mean, double *feature_stddev)
 {
     printf("Limpando memoria...\n");
